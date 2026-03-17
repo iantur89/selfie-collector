@@ -28,7 +28,9 @@ class DynamoIdempotencyStore implements IdempotencyStore {
   constructor(tableName: string) {
     this.tableName = tableName
     const baseClient = new DynamoDBClient({ region: env.awsRegion })
-    this.client = DynamoDBDocumentClient.from(baseClient)
+    this.client = DynamoDBDocumentClient.from(baseClient, {
+      marshallOptions: { removeUndefinedValues: true },
+    })
   }
 
   async has(scope: IdempotencyScope, key: string): Promise<boolean> {

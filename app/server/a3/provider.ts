@@ -10,6 +10,7 @@ class LocalJsonProvider implements Provider {
     const response = {
       chatbotMessage: `Received: ${lastUserMessage}`,
       goalAchieved: false,
+      conversationPayload: {},
     }
     return { content: JSON.stringify(response) }
   }

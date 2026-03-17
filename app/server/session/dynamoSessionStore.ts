@@ -26,7 +26,9 @@ export class DynamoSessionStore<
     const baseClient = new DynamoDBClient({
       region: config.region ?? process.env.AWS_REGION ?? 'us-east-1',
     })
-    this.client = DynamoDBDocumentClient.from(baseClient)
+    this.client = DynamoDBDocumentClient.from(baseClient, {
+      marshallOptions: { removeUndefinedValues: true },
+    })
   }
 
   async load(sessionId: string): Promise<SessionData<TState, TContext> | null> {
