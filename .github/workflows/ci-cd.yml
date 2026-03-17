@@ -1,0 +1,39 @@
+name: CI-CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check and build
+        run: npm run build
+
+      - name: Build Docker image
+        run: docker build -t selfie-data-collector:${{ github.sha }} .
+
+  deploy-placeholder:
+    if: github.ref == 'refs/heads/main'
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deployment handoff
+        run: |
+          echo "Deploy stage placeholder."
+          echo "Wire this job to push image to ECR and update ECS service."

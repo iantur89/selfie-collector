@@ -1,0 +1,83 @@
+Selfie Data Collector – Demo Consent Form
+
+1. Purpose of this Demo
+
+This consent form applies to a demo version of the Selfie Data Collector project. The purpose of this demo is to show how a selfie collection and consent flow could work in practice.
+
+This is not a production system. Your participation is voluntary and is intended only to support testing, development, and demonstration of this workflow.
+
+2. What Data Will Be Collected
+
+If you choose to participate in this demo, we may collect:
+
+- Selfie images that you provide (photos of your face)
+- Images of your identity document (for example, driver’s license or passport), if you choose to upload one
+- Metadata about the images (for example: lighting, angle, blur, occlusion)
+- Basic information you provide in the chat or forms (for example: your name, and optionally email)
+- Technical information such as timestamps and internal session identifiers
+
+3. How Your Data Will Be Used in This Demo
+
+Your data will be used only for:
+
+- Demonstrating how a selfie collection and consent flow works
+- Testing and developing this demo application
+
+Your data will not be used to train or deploy any production machine learning models and will not be used in any commercial product.
+
+4. No Sale or External Sharing of Data
+
+I will not sell any of your data to anyone for any purpose.
+
+Your data will not be shared with third parties for their own use. It may be stored or processed by infrastructure providers (such as cloud storage, databases, or document-signing services) solely to support this demo.
+
+5. Display and Publicity
+
+Your data may be displayed only within this demo application for demonstration and debugging purposes.
+
+It will never be publicly posted, published, or used in marketing materials.
+
+Any screenshots, presentations, or written descriptions of this demo will avoid including identifying images or information about you unless you have explicitly agreed to that separately.
+
+6. Storage and Retention
+
+Your data may be stored temporarily in secure systems used for this demo. It will be kept only as long as is reasonably necessary for testing and development and will not be retained indefinitely.
+
+If you would like your data from this demo to be deleted, you can contact me and I will make reasonable efforts to remove it from active systems, subject to technical limitations and backup retention.
+
+7. Voluntary Participation
+
+Your participation in this demo is completely voluntary. You may choose not to participate or to stop at any time by closing the app or not uploading any images.
+
+8. Contact
+
+If you have questions about this demo or how your data is handled, or if you would like to request deletion of your data, please contact:
+
+- Email: [YOUR CONTACT EMAIL HERE]
+
+9. Consent
+
+By signing below, you confirm that:
+
+- You have read and understood this demo consent form.
+- You understand that this is a demo and not a production system.
+- You understand that your data will not be sold, will not be used in any commercial product, and will only be displayed inside this demo.
+- You voluntarily agree to the collection and temporary use of your images and related data as described above.
+
+---
+
+Participant Information
+
+- Full Name: _______________________________
+
+- Email Address (optional): _______________________________
+
+- Date: ____ / ____ / __________
+
+- Signature: _______________________________
+
+- I confirm that I have read this demo consent form and agree to the collection and temporary use of my images and related data as described above.
+  [  ] I agree
+
+- Internal Session ID (for project use, if applicable): _______________________________
+

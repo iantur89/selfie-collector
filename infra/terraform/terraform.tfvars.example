@@ -1,0 +1,6 @@
+aws_region             = "us-east-1"
+aws_profile            = "selfie-data-collector"
+artifact_bucket_name   = "selfie-data-collector-artifacts-dev"
+session_table_name     = "selfie-collector-sessions"
+idempotency_table_name = "selfie-collector-idempotency"
+enrichment_queue_name  = "selfie-collector-enrichment"
