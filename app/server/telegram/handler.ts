@@ -92,23 +92,25 @@ export async function handleTelegramUpdate(update: TelegramUpdate): Promise<stri
     const photoFileId = message.photo[message.photo.length - 1].file_id
     const artifactKey = `prod/${userId}/${sessionId}/telegram/${Date.now()}-${photoFileId}.jpg`
     const stage = state?.workflowStage ?? 'onboarding_orchestrator'
+    // Accept photos when ID-verify agent is active (orchestrator may have transitioned but not set workflowStage in state)
+    const isIdVerifyFlow =
+      stage === 'id_verify_agent' || sessionData?.activeAgentId === 'id_verify_agent'
 
-    const photoBranch =
-      stage === 'id_verify_agent'
-        ? !state?.idImageS3Key
-          ? 'id_verify_first'
-          : 'id_verify_selfie'
-        : stage === 'ingest_agent'
-          ? 'ingest'
-          : 'unhandled'
-    logTelegramPhoto(sessionId, stage, photoBranch)
+    const photoBranch = isIdVerifyFlow
+      ? !state?.idImageS3Key
+        ? 'id_verify_first'
+        : 'id_verify_selfie'
+      : stage === 'ingest_agent'
+        ? 'ingest'
+        : 'unhandled'
+    logTelegramPhoto(sessionId, `${stage}(active=${sessionData?.activeAgentId ?? 'null'})`, photoBranch)
 
     const photoBytes = await downloadTelegramPhoto(photoFileId)
     if (photoBytes) {
       await persistTelegramPhotoToS3(artifactKey, photoBytes)
     }
 
-    if (stage === 'id_verify_agent') {
+    if (isIdVerifyFlow) {
       if (!state?.idImageS3Key) {
         await updateSessionState(
           sessionId,
@@ -117,8 +119,9 @@ export async function handleTelegramUpdate(update: TelegramUpdate): Promise<stri
             telegramChatId: String(chatId),
             telegramUserId: userId,
             idImageS3Key: artifactKey,
+            workflowStage: 'id_verify_agent',
             verificationAttempts: current.verificationAttempts + 1,
-          }        ),
+          }),
           'id_verify_agent',
         )
         const reply = 'ID image received. Please upload your selfie now.'
