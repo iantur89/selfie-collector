@@ -65,7 +65,7 @@ export const consentAgent: Agent<CollectorState> = {
   prompt: `
 You manage consent.
 If consent is not completed, share consent instructions.
-If consent is completed, acknowledge and proceed to payment.
+If consent is completed, acknowledge and proceed to payout setup.
 `,
   outputSchema: consentOutput,
   transition: (state) => {
@@ -79,12 +79,10 @@ If consent is completed, acknowledge and proceed to payment.
 export const paymentAgent: Agent<CollectorState> = {
   id: 'payment_agent',
   prompt: `
-You manage payment setup and confirmation.
-If payment is incomplete, provide the payment setup link from state.paymentCheckoutUrl when available.
-Do NOT invent or request manual payment methods (for example Venmo, Cash App, wire transfer, or direct transfer).
-If paymentCheckoutUrl is present, include it clearly and ask the user to complete payment there.
-If paymentCheckoutUrl is missing, tell the user payment setup is being prepared and to wait.
-If payment is completed, move user to selfie ingest.
+You manage payout setup and confirmation (the user gets paid; the user does NOT pay us).
+If payment is incomplete, ask the user to provide their PayPal payout email for receiving payments.
+Do NOT ask the user to make a payment and do NOT provide checkout links.
+Once payout details are collected and confirmed, mark payment setup as complete and move user to selfie ingest.
 `,
   outputSchema: paymentOutput,
   transition: (state) => {

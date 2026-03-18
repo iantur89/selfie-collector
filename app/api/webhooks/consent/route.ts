@@ -9,7 +9,6 @@ import { registerCollectorAgents } from '@server/a3/registry'
 import { withSessionLock } from '@server/session/sessionLock'
 import { collectorInitialState } from '@agents/collector'
 import { sendTelegramMessage } from '@server/telegram/sendMessage'
-import { createPayPalCheckout } from '@server/integrations/payPalAdapter'
 
 registerCollectorAgents()
 
@@ -150,58 +149,37 @@ export async function POST(request: NextRequest) {
   }
 
   const consentPayload = payload.data
-  const idempotencyStore = getIdempotencyStore()
-  const eventId = `${consentPayload.eventType}:${consentPayload.documentId}:${consentPayload.status}`
-  const eventKey = crypto.createHash('sha256').update(eventId).digest('hex')
-
-  const claimed = await idempotencyStore.claim('consent_webhook', eventKey)
-  if (!claimed) {
-    return NextResponse.json({ ok: true, duplicate: true })
-  }
   const sessionId = resolveSessionId(consentPayload as unknown as Record<string, unknown>)
   if (!sessionId) {
     console.warn('[ConsentWebhook] No sessionId in payload; DocuSeal must send metadata.sessionId (or externalUserId).')
     return NextResponse.json({ ok: true, ignored: true, reason: 'No sessionId mapping' })
   }
 
+  const idempotencyStore = getIdempotencyStore()
+  // Deduplicate by semantic completion identity, regardless of provider-specific event naming.
+  const eventId = `${sessionId}:${consentPayload.documentId}:${consentPayload.status}`
+  const eventKey = crypto.createHash('sha256').update(eventId).digest('hex')
+
+  const claimed = await idempotencyStore.claim('consent_webhook', eventKey)
+  if (!claimed) {
+    console.log('[ConsentWebhook] Duplicate ignored', {
+      sessionId,
+      documentId: consentPayload.documentId,
+      status: consentPayload.status,
+    })
+    return NextResponse.json({ ok: true, duplicate: true })
+  }
+
   console.log('[ConsentWebhook] POST received', { sessionId, documentId: consentPayload.documentId, status: consentPayload.status })
   const webhookResult = {
     replyToSend: null as string | null,
     telegramChatId: null as number | null,
-    paymentCheckoutUrl: null as string | null,
   }
 
   await withSessionLock(sessionId, async () => {
     const session = createCollectorSession(sessionId)
     const existing = await session.getSessionData()
     const existingState = (existing?.state ?? collectorInitialState) as Record<string, unknown>
-
-    let paymentPatch: Record<string, unknown> = {}
-    if (consentPayload.status === 'completed') {
-      const defaultUserId = sessionId.startsWith('tg-') ? sessionId.replace(/^tg-/, '') : sessionId
-      const userId =
-        typeof existingState.telegramUserId === 'string' && existingState.telegramUserId.length > 0
-          ? existingState.telegramUserId
-          : defaultUserId
-      const returnUrl = env.appBaseUrl.replace(/\/$/, '')
-      const checkout = await createPayPalCheckout({
-        sessionId,
-        userId,
-        amount: 5,
-        currency: 'USD',
-        returnUrl,
-        cancelUrl: returnUrl,
-      })
-      if (checkout.status === 'success' && checkout.checkoutUrl) {
-        webhookResult.paymentCheckoutUrl = checkout.checkoutUrl
-        paymentPatch = {
-          paymentStatus: 'pending',
-          paymentCompleted: false,
-          paymentTransactionId: checkout.transactionId,
-          paymentCheckoutUrl: checkout.checkoutUrl,
-        }
-      }
-    }
 
     await session.upsertSessionData({
       // Ensure the A3 Consent agent evaluates the newly updated consent fields
@@ -211,7 +189,6 @@ export async function POST(request: NextRequest) {
         consentGiven: consentPayload.status === 'completed',
         consentStatus: consentPayload.status === 'completed' ? 'completed' : consentPayload.status,
         consentDocumentId: consentPayload.documentId,
-        ...paymentPatch,
       } as any,
     })
 
@@ -228,14 +205,6 @@ export async function POST(request: NextRequest) {
       webhookResult.telegramChatId = parseInt(sessionId.replace(/^tg-/, ''), 10)
     }
   })
-
-  if (
-    webhookResult.replyToSend &&
-    webhookResult.paymentCheckoutUrl &&
-    !webhookResult.replyToSend.includes(webhookResult.paymentCheckoutUrl)
-  ) {
-    webhookResult.replyToSend = `${webhookResult.replyToSend}\n\nComplete payment here:\n${webhookResult.paymentCheckoutUrl}`
-  }
 
   if (
     webhookResult.replyToSend &&
