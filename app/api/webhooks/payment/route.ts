@@ -40,10 +40,10 @@ export async function POST(request: NextRequest) {
   const eventKey = crypto.createHash('sha256').update(eventId).digest('hex')
   const idempotencyStore = getIdempotencyStore()
 
-  if (await idempotencyStore.has('payment_webhook', eventKey)) {
+  const claimed = await idempotencyStore.claim('payment_webhook', eventKey)
+  if (!claimed) {
     return NextResponse.json({ ok: true, duplicate: true })
   }
-  await idempotencyStore.mark('payment_webhook', eventKey)
 
   const sessionId = payload.resource.custom_id ?? payload.resource.invoice_id
   if (!sessionId) {

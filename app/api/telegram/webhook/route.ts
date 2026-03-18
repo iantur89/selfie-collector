@@ -12,10 +12,10 @@ export async function POST(request: NextRequest) {
     }
 
     const idempotencyStore = getIdempotencyStore()
-    if (await idempotencyStore.has('telegram_update', updateId)) {
+    const claimed = await idempotencyStore.claim('telegram_update', updateId)
+    if (!claimed) {
       return NextResponse.json({ ok: true, duplicate: true })
     }
-    await idempotencyStore.mark('telegram_update', updateId)
 
     const responseMessage = await handleTelegramUpdate(update)
     const chatId = update.message?.chat?.id ?? update.message?.from?.id

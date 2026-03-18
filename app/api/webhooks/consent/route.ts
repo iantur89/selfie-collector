@@ -154,11 +154,10 @@ export async function POST(request: NextRequest) {
   const eventId = `${consentPayload.eventType}:${consentPayload.documentId}:${consentPayload.status}`
   const eventKey = crypto.createHash('sha256').update(eventId).digest('hex')
 
-  if (await idempotencyStore.has('consent_webhook', eventKey)) {
+  const claimed = await idempotencyStore.claim('consent_webhook', eventKey)
+  if (!claimed) {
     return NextResponse.json({ ok: true, duplicate: true })
   }
-
-  await idempotencyStore.mark('consent_webhook', eventKey)
   const sessionId = resolveSessionId(consentPayload as unknown as Record<string, unknown>)
   if (!sessionId) {
     console.warn('[ConsentWebhook] No sessionId in payload; DocuSeal must send metadata.sessionId (or externalUserId).')
