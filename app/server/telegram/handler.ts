@@ -47,9 +47,21 @@ async function downloadTelegramPhoto(fileId: string, sessionId: string): Promise
       status: getFileRes.status,
       statusText: getFileRes.statusText,
     })
-    const getFileJson = (await getFileRes.json()) as { ok?: boolean; result?: { file_path?: string } }
-    const filePath = getFileJson?.result?.file_path
-    console.log('[TelegramDownload] file_path', { sessionId, present: Boolean(filePath), filePath })
+    const getFileJson = await getFileRes
+      .json()
+      .catch((err) => {
+        const message = err instanceof Error ? err.message : String(err)
+        console.error('[TelegramDownload] getFile JSON parse error', { sessionId, message })
+        return null
+      })
+    const filePath = getFileJson?.result?.file_path as string | undefined
+    console.log('[TelegramDownload] getFile json', {
+      sessionId,
+      ok: getFileJson?.ok,
+      hasResult: Boolean(getFileJson?.result),
+      hasFilePath: Boolean(filePath),
+      filePath,
+    })
     if (!filePath) return null
 
     const fileRes = await fetch(`${TELEGRAM_API_BASE}/bot${token}/${filePath}`)
@@ -59,13 +71,28 @@ async function downloadTelegramPhoto(fileId: string, sessionId: string): Promise
       status: fileRes.status,
       statusText: fileRes.statusText,
     })
-    if (!fileRes.ok) return null
+    if (!fileRes.ok) {
+      // Error bodies tend to be small text/JSON; log a snippet for debugging.
+      let errorBody = ''
+      try {
+        errorBody = await fileRes.text()
+      } catch {
+        errorBody = ''
+      }
+      console.error('[TelegramDownload] file download failed', {
+        sessionId,
+        status: fileRes.status,
+        statusText: fileRes.statusText,
+        errorBodySnippet: errorBody ? errorBody.slice(0, 500) : '(empty)',
+      })
+      return null
+    }
     const arrayBuffer = await fileRes.arrayBuffer()
     console.log('[TelegramDownload] downloaded bytes', { sessionId, bytes: arrayBuffer.byteLength })
     return Buffer.from(arrayBuffer)
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    console.error('[TelegramDownload] error', { sessionId, message })
+    console.error('[TelegramDownload] error', { sessionId, message, stack: err instanceof Error ? err.stack : undefined })
     return null
   }
 }
@@ -73,16 +100,31 @@ async function downloadTelegramPhoto(fileId: string, sessionId: string): Promise
 /** Persist Telegram photo to S3 when bucket and token are set. Returns true if uploaded (or skipped because no bucket). */
 async function persistTelegramPhotoToS3(artifactKey: string, photoBytes: Buffer): Promise<boolean> {
   const bucket = env.s3Bucket
-  if (!bucket || bucket === 'memory') return false
+  if (!bucket || bucket === 'memory') {
+    console.error('[TelegramS3] skipped upload: missing/invalid S3 bucket', { bucket: bucket ?? null, artifactKey })
+    return false
+  }
 
-  await persistArtifact({
+  console.log('[TelegramS3] persistTelegramPhotoToS3 called', {
     bucket,
-    key: artifactKey,
-    contentType: 'image/jpeg',
-    bytesBase64: photoBytes.toString('base64'),
-    metadata: {},
+    artifactKey,
+    bytes: photoBytes.byteLength,
   })
-  return true
+  try {
+    await persistArtifact({
+      bucket,
+      key: artifactKey,
+      contentType: 'image/jpeg',
+      bytesBase64: photoBytes.toString('base64'),
+      metadata: {},
+    })
+    console.log('[TelegramS3] upload success', { bucket, artifactKey })
+    return true
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    console.error('[TelegramS3] upload failed', { bucket, artifactKey, message, stack: err instanceof Error ? err.stack : undefined })
+    return false
+  }
 }
 
 export async function handleTelegramUpdate(update: TelegramUpdate): Promise<string> {
@@ -133,7 +175,13 @@ export async function handleTelegramUpdate(update: TelegramUpdate): Promise<stri
       return reply
     }
 
-    await persistTelegramPhotoToS3(artifactKey, photoBytes)
+    const persisted = await persistTelegramPhotoToS3(artifactKey, photoBytes)
+    if (!persisted) {
+      logTelegramUnsupported(sessionId, 'Failed to persist Telegram photo to S3; skipping verification')
+      const reply = 'I received your photo, but I could not store it. Please try again.'
+      logA3Out(sessionId, reply, state as Record<string, unknown>)
+      return reply
+    }
 
     if (isIdVerifyFlow) {
       if (!state?.idImageS3Key) {
