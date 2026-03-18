@@ -29,23 +29,43 @@ registerCollectorAgents()
 const TELEGRAM_API_BASE = 'https://api.telegram.org'
 
 /** Download photo bytes from Telegram by file_id. Returns null if token missing or request fails. */
-async function downloadTelegramPhoto(fileId: string): Promise<Buffer | null> {
+async function downloadTelegramPhoto(fileId: string, sessionId: string): Promise<Buffer | null> {
   const token = env.telegramBotToken
-  if (!token) return null
+  console.log('[TelegramDownload] called', { sessionId, fileId, tokenPresent: Boolean(token) })
+  if (!token) {
+    console.error('[TelegramDownload] missing TELEGRAM_BOT_TOKEN')
+    return null
+  }
 
   try {
     const getFileRes = await fetch(
       `${TELEGRAM_API_BASE}/bot${token}/getFile?file_id=${encodeURIComponent(fileId)}`,
     )
+    console.log('[TelegramDownload] getFile response', {
+      sessionId,
+      ok: getFileRes.ok,
+      status: getFileRes.status,
+      statusText: getFileRes.statusText,
+    })
     const getFileJson = (await getFileRes.json()) as { ok?: boolean; result?: { file_path?: string } }
     const filePath = getFileJson?.result?.file_path
+    console.log('[TelegramDownload] file_path', { sessionId, present: Boolean(filePath), filePath })
     if (!filePath) return null
 
     const fileRes = await fetch(`${TELEGRAM_API_BASE}/bot${token}/${filePath}`)
+    console.log('[TelegramDownload] file download response', {
+      sessionId,
+      ok: fileRes.ok,
+      status: fileRes.status,
+      statusText: fileRes.statusText,
+    })
     if (!fileRes.ok) return null
     const arrayBuffer = await fileRes.arrayBuffer()
+    console.log('[TelegramDownload] downloaded bytes', { sessionId, bytes: arrayBuffer.byteLength })
     return Buffer.from(arrayBuffer)
-  } catch {
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    console.error('[TelegramDownload] error', { sessionId, message })
     return null
   }
 }
@@ -105,7 +125,7 @@ export async function handleTelegramUpdate(update: TelegramUpdate): Promise<stri
         : 'unhandled'
     logTelegramPhoto(sessionId, `${stage}(active=${sessionData?.activeAgentId ?? 'null'})`, photoBranch)
 
-    const photoBytes = await downloadTelegramPhoto(photoFileId)
+    const photoBytes = await downloadTelegramPhoto(photoFileId, sessionId)
     if (!photoBytes) {
       logTelegramUnsupported(sessionId, 'Failed to download Telegram photo; skipping verification')
       const reply = 'I could not download your photo from Telegram. Please try sending it again.'
