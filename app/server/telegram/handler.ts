@@ -3,6 +3,7 @@ import { logA3In, logA3Out, logTelegramPhoto, logTelegramUnsupported } from '../
 import { registerCollectorAgents } from '../a3/registry'
 import { createCollectorSession, injectSystemEvent, updateSessionState } from '../a3/session'
 import { verifyDocumentAndSelfie, faceMatch } from '../integrations/identityAdapter'
+import { createSigningLink } from '../integrations/docuSealAdapter'
 import { persistArtifact } from '../storage/artifactStore'
 import { env } from '../config/env'
 
@@ -231,11 +232,57 @@ export async function handleTelegramUpdate(update: TelegramUpdate): Promise<stri
         'id_verify_agent',
       )
 
-      await injectSystemEvent(sessionId, 'Identity verification was updated from Telegram upload.')
-      const reply =
-        verify.outcome === 'verified' && match.matched
-          ? 'Identity verified. We can now continue with consent.'
-          : 'Verification was not successful. Please retry with clearer images.'
+      const identityUpdatedResult = await injectSystemEvent(sessionId, 'Identity verification was updated from Telegram upload.')
+      let reply = identityUpdatedResult.responseMessage
+
+      let consentStatusForLog: string | undefined
+      if (verify.outcome === 'verified' && match.matched) {
+        const callbackUrl = `${env.appBaseUrl}/api/webhooks/consent`
+        const signing = await createSigningLink({
+          sessionId,
+          userId,
+          name: state?.name,
+          callbackUrl,
+        })
+
+        console.log('[ConsentLink] createSigningLink result', {
+          sessionId,
+          status: signing.status,
+          hasSigningUrl: Boolean(signing.signingUrl),
+          documentId: signing.documentId,
+          errorCode: signing.error?.code,
+          errorMessage: signing.error?.message,
+        })
+
+        if (signing.status === 'success' && signing.signingUrl) {
+          consentStatusForLog = 'link_sent'
+          await updateSessionState(
+            sessionId,
+            (current) => ({
+              ...current,
+              consentStatus: 'link_sent',
+              consentDocumentId: signing.documentId,
+            }),
+            'consent_agent',
+          )
+          reply = `${reply}\n\n${signing.signingUrl}`
+        } else {
+          consentStatusForLog = 'error'
+          await updateSessionState(
+            sessionId,
+            (current) => ({
+              ...current,
+              consentStatus: 'error',
+              lastErrorCode: signing.error?.code,
+              lastErrorMessage: signing.error?.message,
+            }),
+            'consent_agent',
+          )
+          const message = signing.error?.message ? `Consent link unavailable: ${signing.error.message}` : 'Consent link unavailable.'
+          reply = `${reply}\n\n${message}`
+        }
+      }
+
       logA3Out(sessionId, reply, {
         ...state,
         selfieImageS3Key: artifactKey,
@@ -243,6 +290,7 @@ export async function handleTelegramUpdate(update: TelegramUpdate): Promise<stri
         idVerified: verify.outcome === 'verified',
         faceMatched: match.matched,
         verificationStatus: verify.outcome,
+        consentStatus: consentStatusForLog,
         workflowStage: verify.outcome === 'verified' && match.matched ? 'consent_agent' : 'id_verify_agent',
       })
       return reply
