@@ -152,6 +152,21 @@ sudo docker image prune -f
 sudo docker builder prune -f
 ```
 
+## If consent completes in the browser but the bot does nothing
+
+The "Consent received" / "Thanks" page is from a **browser redirect** (GET). The bot only advances when **DocuSeal's server** sends a **POST** to your app. If that webhook is not configured, nothing happens in Telegram.
+
+**Configure DocuSeal to send completion webhooks:**
+
+1. In DocuSeal open **Webhooks** (or **Integrations** → Webhooks).
+2. Click **New webhook** (or Add).
+3. Set **URL** to: `https://app.3.88.220.252.sslip.io/api/webhooks/consent` (use your real app host if different).
+4. Enable events that include **form completed** / **submission completed** (e.g. `form.completed`).
+5. (Optional) Add a **Signing secret**, then set the same value as `DOCUSEAL_WEBHOOK_SECRET` in your app `.env`. If you leave it empty, the app skips signature verification.
+6. Save the webhook.
+
+After saving, when a user completes the form, DocuSeal will **POST** the event to that URL. The app then updates the session and the bot sends the next message (e.g. payment setup). To confirm the POST is received, on EC2 run `sudo docker logs --tail 50 -f selfie-app` and look for `[ConsentWebhook] POST received`.
+
 ## Notes (from your earlier debugging)
 
 - The “405 Method Not Allowed” you saw when clicking DocuSeal submit happens when a browser tries to `GET` an endpoint that only implements `POST`.

@@ -58,6 +58,7 @@ export const CollectorStateSchema = z.object({
   paymentStatus: PaymentStatusSchema.default('pending'),
   paymentProvider: z.literal('paypal').default('paypal'),
   paymentTransactionId: z.string().optional(),
+  paymentCheckoutUrl: z.string().optional(),
   selfieCount: z.number().int().default(0),
   minSelfiesRequired: z.number().int().default(5),
   maxSelfiesAllowed: z.number().int().default(20),

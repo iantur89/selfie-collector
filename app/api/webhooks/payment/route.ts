@@ -8,6 +8,7 @@ import { createCollectorSession } from '@server/a3/session'
 import { registerCollectorAgents } from '@server/a3/registry'
 import { withSessionLock } from '@server/session/sessionLock'
 import { collectorInitialState } from '@agents/collector'
+import { sendTelegramMessage } from '@server/telegram/sendMessage'
 
 registerCollectorAgents()
 
@@ -50,6 +51,9 @@ export async function POST(request: NextRequest) {
   }
 
   const mappedStatus = mapPayPalStatus(payload.resource.status)
+  let replyToSend: string | null = null
+  let telegramChatId: number | null = null
+
   await withSessionLock(sessionId, async () => {
     const session = createCollectorSession(sessionId)
     const existing = await session.getSessionData()
@@ -64,8 +68,22 @@ export async function POST(request: NextRequest) {
       },
     })
 
-    await session.send('User has completed the payment.')
+    const result = await session.send('User has completed the payment.')
+    replyToSend = result.responseMessage ?? null
+    const state = result.state as Record<string, unknown> | undefined
+    const chatIdFromState = state?.telegramChatId
+    if (typeof chatIdFromState === 'string') {
+      telegramChatId = parseInt(chatIdFromState, 10)
+    } else if (typeof chatIdFromState === 'number') {
+      telegramChatId = chatIdFromState
+    } else if (typeof sessionId === 'string' && sessionId.startsWith('tg-')) {
+      telegramChatId = parseInt(sessionId.replace(/^tg-/, ''), 10)
+    }
   })
+
+  if (replyToSend && telegramChatId != null && !Number.isNaN(telegramChatId)) {
+    await sendTelegramMessage(telegramChatId, replyToSend)
+  }
 
   return NextResponse.json({ ok: true })
 }

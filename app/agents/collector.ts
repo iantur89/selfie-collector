@@ -80,7 +80,10 @@ export const paymentAgent: Agent<CollectorState> = {
   id: 'payment_agent',
   prompt: `
 You manage payment setup and confirmation.
-If payment is incomplete, provide payment instructions.
+If payment is incomplete, provide the payment setup link from state.paymentCheckoutUrl when available.
+Do NOT invent or request manual payment methods (for example Venmo, Cash App, wire transfer, or direct transfer).
+If paymentCheckoutUrl is present, include it clearly and ask the user to complete payment there.
+If paymentCheckoutUrl is missing, tell the user payment setup is being prepared and to wait.
 If payment is completed, move user to selfie ingest.
 `,
   outputSchema: paymentOutput,

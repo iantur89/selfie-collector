@@ -1,19 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { env } from '@server/config/env'
 import { getIdempotencyStore } from '@server/idempotency/store'
 import { handleTelegramUpdate } from '@server/telegram/handler'
-
-const TELEGRAM_API_BASE = 'https://api.telegram.org'
-
-async function sendTelegramMessage(chatId: number, text: string): Promise<void> {
-  const token = env.telegramBotToken
-  if (!token || !text) return
-  await fetch(`${TELEGRAM_API_BASE}/bot${token}/sendMessage`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: chatId, text }),
-  })
-}
+import { sendTelegramMessage } from '@server/telegram/sendMessage'
 
 export async function POST(request: NextRequest) {
   try {

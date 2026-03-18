@@ -8,6 +8,8 @@ import { createCollectorSession } from '@server/a3/session'
 import { registerCollectorAgents } from '@server/a3/registry'
 import { withSessionLock } from '@server/session/sessionLock'
 import { collectorInitialState } from '@agents/collector'
+import { sendTelegramMessage } from '@server/telegram/sendMessage'
+import { createPayPalCheckout } from '@server/integrations/payPalAdapter'
 
 registerCollectorAgents()
 
@@ -159,27 +161,90 @@ export async function POST(request: NextRequest) {
   await idempotencyStore.mark('consent_webhook', eventKey)
   const sessionId = resolveSessionId(consentPayload as unknown as Record<string, unknown>)
   if (!sessionId) {
+    console.warn('[ConsentWebhook] No sessionId in payload; DocuSeal must send metadata.sessionId (or externalUserId).')
     return NextResponse.json({ ok: true, ignored: true, reason: 'No sessionId mapping' })
+  }
+
+  console.log('[ConsentWebhook] POST received', { sessionId, documentId: consentPayload.documentId, status: consentPayload.status })
+  const webhookResult = {
+    replyToSend: null as string | null,
+    telegramChatId: null as number | null,
+    paymentCheckoutUrl: null as string | null,
   }
 
   await withSessionLock(sessionId, async () => {
     const session = createCollectorSession(sessionId)
     const existing = await session.getSessionData()
+    const existingState = (existing?.state ?? collectorInitialState) as Record<string, unknown>
+
+    let paymentPatch: Record<string, unknown> = {}
+    if (consentPayload.status === 'completed') {
+      const defaultUserId = sessionId.startsWith('tg-') ? sessionId.replace(/^tg-/, '') : sessionId
+      const userId =
+        typeof existingState.telegramUserId === 'string' && existingState.telegramUserId.length > 0
+          ? existingState.telegramUserId
+          : defaultUserId
+      const returnUrl = env.appBaseUrl.replace(/\/$/, '')
+      const checkout = await createPayPalCheckout({
+        sessionId,
+        userId,
+        amount: 5,
+        currency: 'USD',
+        returnUrl,
+        cancelUrl: returnUrl,
+      })
+      if (checkout.status === 'success' && checkout.checkoutUrl) {
+        webhookResult.paymentCheckoutUrl = checkout.checkoutUrl
+        paymentPatch = {
+          paymentStatus: 'pending',
+          paymentCompleted: false,
+          paymentTransactionId: checkout.transactionId,
+          paymentCheckoutUrl: checkout.checkoutUrl,
+        }
+      }
+    }
 
     await session.upsertSessionData({
       // Ensure the A3 Consent agent evaluates the newly updated consent fields
       activeAgentId: 'consent_agent' as any,
       state: {
-        ...(existing?.state ?? collectorInitialState),
+        ...existingState,
         consentGiven: consentPayload.status === 'completed',
         consentStatus: consentPayload.status === 'completed' ? 'completed' : consentPayload.status,
         consentDocumentId: consentPayload.documentId,
-      },
+        ...paymentPatch,
+      } as any,
     })
 
     // Trigger A3 routing/transition based on updated state
-    await session.send('User has submitted the consent form.')
+    const result = await session.send('User has submitted the consent form.')
+    webhookResult.replyToSend = result.responseMessage ?? null
+    const state = result.state as Record<string, unknown> | undefined
+    const chatIdFromState = state?.telegramChatId
+    if (typeof chatIdFromState === 'string') {
+      webhookResult.telegramChatId = parseInt(chatIdFromState, 10)
+    } else if (typeof chatIdFromState === 'number') {
+      webhookResult.telegramChatId = chatIdFromState
+    } else if (sessionId.startsWith('tg-')) {
+      webhookResult.telegramChatId = parseInt(sessionId.replace(/^tg-/, ''), 10)
+    }
   })
+
+  if (
+    webhookResult.replyToSend &&
+    webhookResult.paymentCheckoutUrl &&
+    !webhookResult.replyToSend.includes(webhookResult.paymentCheckoutUrl)
+  ) {
+    webhookResult.replyToSend = `${webhookResult.replyToSend}\n\nComplete payment here:\n${webhookResult.paymentCheckoutUrl}`
+  }
+
+  if (
+    webhookResult.replyToSend &&
+    webhookResult.telegramChatId != null &&
+    !Number.isNaN(webhookResult.telegramChatId)
+  ) {
+    await sendTelegramMessage(webhookResult.telegramChatId, webhookResult.replyToSend)
+  }
 
   return NextResponse.json({ ok: true })
 }
