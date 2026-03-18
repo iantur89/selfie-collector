@@ -106,9 +106,14 @@ export async function handleTelegramUpdate(update: TelegramUpdate): Promise<stri
     logTelegramPhoto(sessionId, `${stage}(active=${sessionData?.activeAgentId ?? 'null'})`, photoBranch)
 
     const photoBytes = await downloadTelegramPhoto(photoFileId)
-    if (photoBytes) {
-      await persistTelegramPhotoToS3(artifactKey, photoBytes)
+    if (!photoBytes) {
+      logTelegramUnsupported(sessionId, 'Failed to download Telegram photo; skipping verification')
+      const reply = 'I could not download your photo from Telegram. Please try sending it again.'
+      logA3Out(sessionId, reply, state as Record<string, unknown>)
+      return reply
     }
+
+    await persistTelegramPhotoToS3(artifactKey, photoBytes)
 
     if (isIdVerifyFlow) {
       if (!state?.idImageS3Key) {
@@ -167,6 +172,7 @@ export async function handleTelegramUpdate(update: TelegramUpdate): Promise<stri
         selfieVerified: verify.outcome === 'verified',
         idVerified: verify.outcome === 'verified',
         faceMatched: match.matched,
+        verificationStatus: verify.outcome,
         workflowStage: verify.outcome === 'verified' && match.matched ? 'consent_agent' : 'id_verify_agent',
       })
       return reply

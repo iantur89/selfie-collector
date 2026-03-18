@@ -17,6 +17,24 @@ export function createCollectorSession(sessionId: string) {
   })
 }
 
+export async function getCollectorSessionData(sessionId: string) {
+  const session = createCollectorSession(sessionId)
+  return session.getSessionData()
+}
+
+export async function deleteCollectorSession(sessionId: string) {
+  if (typeof (store as { delete?: (id: string) => Promise<void> }).delete === 'function') {
+    await (store as { delete: (id: string) => Promise<void> }).delete(sessionId)
+    return
+  }
+
+  const session = createCollectorSession(sessionId)
+  await session.upsertSessionData({
+    activeAgentId: 'onboarding_orchestrator' as any,
+    state: collectorInitialState,
+  })
+}
+
 export async function applySessionStateUpdate(
   sessionId: string,
   update: Partial<CollectorState>,

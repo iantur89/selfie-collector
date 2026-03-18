@@ -6,6 +6,7 @@ import { Box, Typography, Card, CardActionArea, Container, Stack } from '@mui/ma
 import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutline'
 import StreamIcon from '@mui/icons-material/Stream'
 import ExtensionIcon from '@mui/icons-material/Extension'
+import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings'
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward'
 
 export default function Home() {
@@ -160,6 +161,44 @@ export default function Home() {
                 </Typography>
                 <Stack direction="row" alignItems="center" gap={1} color="#2e7d32" fontWeight="bold" mt={2}>
                   Try it out <ArrowForwardIcon fontSize="small" />
+                </Stack>
+              </CardActionArea>
+            </Card>
+
+            <Card
+              elevation={0}
+              sx={{
+                flex: 1,
+                border: 1,
+                borderColor: 'divider',
+                borderRadius: 4,
+                transition: '0.2s',
+                '&:hover': { borderColor: '#7f1d1d', transform: 'translateY(-4px)', boxShadow: 4 },
+              }}
+            >
+              <CardActionArea
+                component={Link}
+                href="/admin/users"
+                sx={{
+                  p: 4,
+                  height: '100%',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'flex-start',
+                  gap: 2,
+                }}
+              >
+                <Box sx={{ p: 2, bgcolor: 'rgba(127, 29, 29, 0.1)', color: '#7f1d1d', borderRadius: 2 }}>
+                  <AdminPanelSettingsIcon fontSize="large" />
+                </Box>
+                <Typography variant="h5" fontWeight="bold">
+                  Admin Users
+                </Typography>
+                <Typography variant="body1" color="text.secondary" sx={{ flexGrow: 1 }}>
+                  Inspect user chat session state, review dataset-linked records, and reset a user session when needed.
+                </Typography>
+                <Stack direction="row" alignItems="center" gap={1} color="#7f1d1d" fontWeight="bold" mt={2}>
+                  Open dashboard <ArrowForwardIcon fontSize="small" />
                 </Stack>
               </CardActionArea>
             </Card>

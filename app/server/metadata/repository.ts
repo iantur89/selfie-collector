@@ -190,3 +190,56 @@ export async function recordAuditLog(action: string, actor: string, metadata: Re
     [action, actor, JSON.stringify(metadata), createdAt],
   )
 }
+
+export async function listDatasetRecordsBySession(sessionId: string): Promise<DatasetRecord[]> {
+  if (!pool) {
+    return Array.from(memoryRecords.values()).filter((record) => record.sessionId === sessionId)
+  }
+
+  const result = await pool.query(
+    `
+      SELECT selfie_id, session_id, user_id, s3_key, verification_status, consented, paid, tags, confidence, model_name, model_version, created_at
+      FROM dataset_records
+      WHERE session_id = $1
+      ORDER BY created_at DESC
+    `,
+    [sessionId],
+  )
+
+  return result.rows.map((row) => ({
+    selfieId: row.selfie_id,
+    sessionId: row.session_id,
+    userId: row.user_id,
+    s3Key: row.s3_key,
+    verificationStatus: row.verification_status,
+    consented: row.consented,
+    paid: row.paid,
+    tags: row.tags,
+    confidence: row.confidence,
+    modelName: row.model_name,
+    modelVersion: row.model_version,
+    createdAt: row.created_at,
+  }))
+}
+
+export async function deleteDatasetRecordsBySession(sessionId: string): Promise<number> {
+  if (!pool) {
+    let deleted = 0
+    for (const [key, value] of memoryRecords.entries()) {
+      if (value.sessionId === sessionId) {
+        memoryRecords.delete(key)
+        deleted += 1
+      }
+    }
+    return deleted
+  }
+
+  const result = await pool.query(
+    `
+      DELETE FROM dataset_records
+      WHERE session_id = $1
+    `,
+    [sessionId],
+  )
+  return result.rowCount ?? 0
+}
