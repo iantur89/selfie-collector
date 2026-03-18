@@ -114,7 +114,9 @@ echo "Container status:"
 sudo docker ps --format "{{.Names}}  {{.Image}}  {{.Status}}" | head -n 5
 "@
 
-Run "ssh" @("-i", $KeyPath, "${SshUser}@${Ec2Host}", $remoteCmd)
+$escapedRemoteCmd = $remoteCmd -replace "'", "'\\''"
+$sshCmd = "bash -lc '$escapedRemoteCmd'"
+Run "ssh" @("-i", $KeyPath, "${SshUser}@${Ec2Host}", $sshCmd)
 
 Write-Host "==> [6/6] Cleanup" -ForegroundColor Cyan
 if (-not $KeepTar) {
