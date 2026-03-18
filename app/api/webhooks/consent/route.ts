@@ -4,8 +4,10 @@ import { ConsentWebhookPayloadSchema } from '@contracts/webhooks'
 import { env } from '@server/config/env'
 import { getIdempotencyStore } from '@server/idempotency/store'
 import { verifyHmacSignature } from '@server/webhooks/signature'
-import { applySessionStateUpdate, injectSystemEvent } from '@server/a3/session'
+import { createCollectorSession } from '@server/a3/session'
 import { registerCollectorAgents } from '@server/a3/registry'
+import { withSessionLock } from '@server/session/sessionLock'
+import { collectorInitialState } from '@agents/collector'
 
 registerCollectorAgents()
 
@@ -94,7 +96,31 @@ function resolveSessionId(payload: Record<string, unknown>): string | null {
 
 // Allow simple browser redirects to this endpoint without a noisy 405.
 export async function GET() {
-  return NextResponse.json({ ok: true, note: 'POST /api/webhooks/consent is required.' })
+  // DocuSeal often redirects the user's browser to `completed_redirect_url`.
+  // A3 progress still happens from the real `POST /api/webhooks/consent` server-to-server webhook.
+  return new NextResponse(
+    `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Consent received</title>
+    <style>
+      body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:40px;line-height:1.4}
+      .card{max-width:640px;border:1px solid #e5e7eb;border-radius:14px;padding:20px 22px}
+      .ok{display:inline-block;background:#dcfce7;color:#166534;border:1px solid #bbf7d0;padding:4px 10px;border-radius:999px;font-weight:600}
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="ok">Consent received</div>
+      <h1>Thanks.</h1>
+      <p>This page is just a browser confirmation. Your session will be updated automatically.</p>
+    </div>
+  </body>
+</html>`,
+    { headers: { 'content-type': 'text/html; charset=utf-8' } },
+  )
 }
 
 export async function POST(request: NextRequest) {
@@ -136,17 +162,24 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true, ignored: true, reason: 'No sessionId mapping' })
   }
 
-  await applySessionStateUpdate(
-    sessionId,
-    {
-      consentGiven: consentPayload.status === 'completed',
-      consentStatus: consentPayload.status === 'completed' ? 'completed' : consentPayload.status,
-      consentDocumentId: consentPayload.documentId,
-    },
-    'consent_agent',
-  )
+  await withSessionLock(sessionId, async () => {
+    const session = createCollectorSession(sessionId)
+    const existing = await session.getSessionData()
 
-  await injectSystemEvent(sessionId, 'Consent webhook event received and processed.')
+    await session.upsertSessionData({
+      // Ensure the A3 Consent agent evaluates the newly updated consent fields
+      activeAgentId: 'consent_agent' as any,
+      state: {
+        ...(existing?.state ?? collectorInitialState),
+        consentGiven: consentPayload.status === 'completed',
+        consentStatus: consentPayload.status === 'completed' ? 'completed' : consentPayload.status,
+        consentDocumentId: consentPayload.documentId,
+      },
+    })
+
+    // Trigger A3 routing/transition based on updated state
+    await session.send('User has submitted the consent form.')
+  })
 
   return NextResponse.json({ ok: true })
 }

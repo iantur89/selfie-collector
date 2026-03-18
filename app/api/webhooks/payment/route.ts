@@ -4,8 +4,10 @@ import { PayPalWebhookPayloadSchema } from '@contracts/webhooks'
 import { env } from '@server/config/env'
 import { getIdempotencyStore } from '@server/idempotency/store'
 import { verifyHmacSignature } from '@server/webhooks/signature'
-import { applySessionStateUpdate, injectSystemEvent } from '@server/a3/session'
+import { createCollectorSession } from '@server/a3/session'
 import { registerCollectorAgents } from '@server/a3/registry'
+import { withSessionLock } from '@server/session/sessionLock'
+import { collectorInitialState } from '@agents/collector'
 
 registerCollectorAgents()
 
@@ -48,16 +50,22 @@ export async function POST(request: NextRequest) {
   }
 
   const mappedStatus = mapPayPalStatus(payload.resource.status)
-  await applySessionStateUpdate(
-    sessionId,
-    {
-      paymentCompleted: mappedStatus === 'paid',
-      paymentStatus: mappedStatus,
-      paymentTransactionId: payload.resource.id,
-    },
-    'payment_agent',
-  )
-  await injectSystemEvent(sessionId, 'Payment webhook event received and processed.')
+  await withSessionLock(sessionId, async () => {
+    const session = createCollectorSession(sessionId)
+    const existing = await session.getSessionData()
+
+    await session.upsertSessionData({
+      activeAgentId: 'payment_agent' as any,
+      state: {
+        ...(existing?.state ?? collectorInitialState),
+        paymentCompleted: mappedStatus === 'paid',
+        paymentStatus: mappedStatus,
+        paymentTransactionId: payload.resource.id,
+      },
+    })
+
+    await session.send('User has completed the payment.')
+  })
 
   return NextResponse.json({ ok: true })
 }
