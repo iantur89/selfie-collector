@@ -12,7 +12,7 @@ Logging is **console-based** and focused on the A3 flow. There are no log levels
 
 ## A3 Flow Logging
 
-The A3 message-and-tool loop emits structured, boxed logs. All of these live in `data-collector/src/utils/log.ts` and are called from the flow layer.
+The A3 message-and-tool loop emits structured, boxed logs. The log helpers live in `app/server/a3/log.ts` and are called from the Telegram handler (`app/server/telegram/handler.ts`) and can be used from other flow layers.
 
 ### Box format
 
@@ -32,12 +32,11 @@ Long strings are truncated (default 80 chars) with `…` unless `truncate: false
 | Function | When | Content |
 |----------|------|---------|
 | `logA3In` | Start of processing a user message | `sessionId`, truncated `message` |
-| `logA3AgentResponse` | After agent(s) respond | `activeAgent`, `nextAgent`, transition hint |
-| `logA3AgentChange` | When active agent changes (handoff) | `fromAgent → toAgent` |
-| `logA3DecidedTool` | Agent output requested a tool | `tool`, `params` |
-| `logA3ToolRunning` | Before running the tool | `▶ toolName` |
-| `logA3ToolComplete` | After tool finishes | `tool`, `success`, `message`, optional `data` |
-| `logA3Out` | End of turn, final reply | `sessionId`, agent transition, `goalAchieved`, truncated `reply`, full state snapshot |
+| `logA3Out` | End of turn, final reply | `sessionId`, truncated `reply`, state snapshot (workflowStage, idVerified, etc.) |
+| `logTelegramPhoto` | Telegram: user sent a photo | `sessionId`, `workflowStage`, `branch` (id_verify_first \| id_verify_selfie \| ingest \| unhandled) |
+| `logTelegramUnsupported` | Telegram: message type not handled | `sessionId`, `detail` |
+| *(future)* `logA3AgentResponse` | After agent(s) respond | `activeAgent`, `nextAgent`, transition hint |
+| *(future)* `logA3DecidedTool` / `logA3ToolComplete` | Tool invocations | When A3 flow layer is instrumented |
 
 ### State snapshot
 

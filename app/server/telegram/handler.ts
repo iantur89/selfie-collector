@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { logA3In, logA3Out, logTelegramPhoto, logTelegramUnsupported } from '../a3/log'
 import { registerCollectorAgents } from '../a3/registry'
 import { createCollectorSession, injectSystemEvent, updateSessionState } from '../a3/session'
 import { verifyDocumentAndSelfie, faceMatch } from '../integrations/identityAdapter'
@@ -67,6 +68,7 @@ async function persistTelegramPhotoToS3(artifactKey: string, photoBytes: Buffer)
 export async function handleTelegramUpdate(update: TelegramUpdate): Promise<string> {
   const message = update.message
   if (!message) {
+    logTelegramUnsupported('unknown', 'No message payload')
     return 'No message payload received.'
   }
 
@@ -81,16 +83,32 @@ export async function handleTelegramUpdate(update: TelegramUpdate): Promise<stri
   const sessionData = await session.getSessionData()
   const state = sessionData?.state
 
+  const incomingSummary = message.photo?.length
+    ? `User sent an image. fileId: ${message.photo[message.photo.length - 1].file_id}`
+    : (message.text ?? message.caption ?? '(no text)')
+  logA3In(sessionId, incomingSummary)
+
   if (message.photo && message.photo.length > 0) {
     const photoFileId = message.photo[message.photo.length - 1].file_id
     const artifactKey = `prod/${userId}/${sessionId}/telegram/${Date.now()}-${photoFileId}.jpg`
+    const stage = state?.workflowStage ?? 'onboarding_orchestrator'
+
+    const photoBranch =
+      stage === 'id_verify_agent'
+        ? !state?.idImageS3Key
+          ? 'id_verify_first'
+          : 'id_verify_selfie'
+        : stage === 'ingest_agent'
+          ? 'ingest'
+          : 'unhandled'
+    logTelegramPhoto(sessionId, stage, photoBranch)
 
     const photoBytes = await downloadTelegramPhoto(photoFileId)
     if (photoBytes) {
       await persistTelegramPhotoToS3(artifactKey, photoBytes)
     }
 
-    if ((state?.workflowStage ?? 'onboarding_orchestrator') === 'id_verify_agent') {
+    if (stage === 'id_verify_agent') {
       if (!state?.idImageS3Key) {
         await updateSessionState(
           sessionId,
@@ -100,10 +118,12 @@ export async function handleTelegramUpdate(update: TelegramUpdate): Promise<stri
             telegramUserId: userId,
             idImageS3Key: artifactKey,
             verificationAttempts: current.verificationAttempts + 1,
-          }),
+          }        ),
           'id_verify_agent',
         )
-        return 'ID image received. Please upload your selfie now.'
+        const reply = 'ID image received. Please upload your selfie now.'
+        logA3Out(sessionId, reply, { ...state, idImageS3Key: artifactKey, workflowStage: 'id_verify_agent' })
+        return reply
       }
 
       const verify = await verifyDocumentAndSelfie({
@@ -134,12 +154,22 @@ export async function handleTelegramUpdate(update: TelegramUpdate): Promise<stri
       )
 
       await injectSystemEvent(sessionId, 'Identity verification was updated from Telegram upload.')
-      return verify.outcome === 'verified' && match.matched
-        ? 'Identity verified. We can now continue with consent.'
-        : 'Verification was not successful. Please retry with clearer images.'
+      const reply =
+        verify.outcome === 'verified' && match.matched
+          ? 'Identity verified. We can now continue with consent.'
+          : 'Verification was not successful. Please retry with clearer images.'
+      logA3Out(sessionId, reply, {
+        ...state,
+        selfieImageS3Key: artifactKey,
+        selfieVerified: verify.outcome === 'verified',
+        idVerified: verify.outcome === 'verified',
+        faceMatched: match.matched,
+        workflowStage: verify.outcome === 'verified' && match.matched ? 'consent_agent' : 'id_verify_agent',
+      })
+      return reply
     }
 
-    if ((state?.workflowStage ?? 'onboarding_orchestrator') === 'ingest_agent') {
+    if (stage === 'ingest_agent') {
       await updateSessionState(
         sessionId,
         (current) => ({
@@ -151,15 +181,21 @@ export async function handleTelegramUpdate(update: TelegramUpdate): Promise<stri
         }),
         'ingest_agent',
       )
-      return 'Photo received for ingest.'
+      const reply = 'Photo received for ingest.'
+      logA3Out(sessionId, reply, state as Record<string, unknown>)
+      return reply
     }
   }
 
   const text = message.text ?? message.caption ?? ''
   if (!text) {
-    return 'Unsupported message type. Please send text or image.'
+    logTelegramUnsupported(sessionId, 'No text or caption and photo not handled in current stage')
+    const reply = 'Unsupported message type. Please send text or image.'
+    logA3Out(sessionId, reply, state as Record<string, unknown>)
+    return reply
   }
 
   const result = await session.send(text)
+  logA3Out(sessionId, result.responseMessage, result.state as Record<string, unknown>)
   return result.responseMessage
 }
