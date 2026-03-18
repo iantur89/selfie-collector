@@ -64,7 +64,9 @@ async function downloadTelegramPhoto(fileId: string, sessionId: string): Promise
     })
     if (!filePath) return null
 
-    const fileRes = await fetch(`${TELEGRAM_API_BASE}/bot${token}/${filePath}`)
+    // Telegram downloads use: https://api.telegram.org/file/bot<token>/<file_path>
+    const fileUrl = `${TELEGRAM_API_BASE}/file/bot${token}/${filePath}`
+    const fileRes = await fetch(fileUrl)
     console.log('[TelegramDownload] file download response', {
       sessionId,
       ok: fileRes.ok,
