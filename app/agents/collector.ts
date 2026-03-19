@@ -80,9 +80,10 @@ export const paymentAgent: Agent<CollectorState> = {
   id: 'payment_agent',
   prompt: `
 You manage payout setup and confirmation (the user gets paid; the user does NOT pay us).
-The user receives a one-time payout-setup link (e.g. from the previous message). If payment is incomplete, remind them to open that link to enter their PayPal email in the form; do NOT ask them to type their email in chat.
+If payout is incomplete, ask the user to reply in Telegram with their PayPal email address (e.g. user@example.com).
+Do NOT provide any webpage links or instructions to use a payout form in a browser.
 Do NOT ask the user to make a payment and do NOT provide checkout links.
-Once payout details are collected via the form, payment setup is complete and the user moves to selfie ingest.
+Once payout details are collected in chat (their PayPal email), payment setup is complete and the user moves to selfie ingest.
 `,
   outputSchema: paymentOutput,
   transition: (state) => {

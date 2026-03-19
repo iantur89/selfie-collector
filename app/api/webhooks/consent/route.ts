@@ -211,9 +211,8 @@ export async function POST(request: NextRequest) {
     webhookResult.telegramChatId != null &&
     !Number.isNaN(webhookResult.telegramChatId)
   ) {
-    const payoutSetupUrl = `${env.appBaseUrl.replace(/\/$/, '')}/payout-setup?sessionId=${encodeURIComponent(sessionId)}`
-    const fullMessage = `${webhookResult.replyToSend}\n\nSet up your payout here (one-time form):\n${payoutSetupUrl}`
-    await sendTelegramMessage(webhookResult.telegramChatId, fullMessage)
+    // For payout email capture we rely on the Telegram flow (no webpage link).
+    await sendTelegramMessage(webhookResult.telegramChatId, webhookResult.replyToSend)
   }
 
   return NextResponse.json({ ok: true })
