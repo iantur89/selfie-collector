@@ -211,7 +211,9 @@ export async function POST(request: NextRequest) {
     webhookResult.telegramChatId != null &&
     !Number.isNaN(webhookResult.telegramChatId)
   ) {
-    await sendTelegramMessage(webhookResult.telegramChatId, webhookResult.replyToSend)
+    const payoutSetupUrl = `${env.appBaseUrl.replace(/\/$/, '')}/payout-setup?sessionId=${encodeURIComponent(sessionId)}`
+    const fullMessage = `${webhookResult.replyToSend}\n\nSet up your payout here (one-time form):\n${payoutSetupUrl}`
+    await sendTelegramMessage(webhookResult.telegramChatId, fullMessage)
   }
 
   return NextResponse.json({ ok: true })

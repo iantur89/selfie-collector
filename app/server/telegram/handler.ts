@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { logA3In, logA3Out, logTelegramPhoto, logTelegramUnsupported } from '../a3/log'
 import { registerCollectorAgents } from '../a3/registry'
 import { createCollectorSession, injectSystemEvent, updateSessionState } from '../a3/session'
+import { executePayoutForSession } from '../payouts/executePayout'
 import { verifyDocumentAndSelfie, faceMatch } from '../integrations/identityAdapter'
 import { createSigningLink } from '../integrations/docuSealAdapter'
 import { persistArtifact } from '../storage/artifactStore'
@@ -314,7 +315,7 @@ export async function handleTelegramUpdate(update: TelegramUpdate): Promise<stri
     }
   }
 
-  const text = message.text ?? message.caption ?? ''
+  const text = (message.text ?? message.caption ?? '').trim()
   if (!text) {
     logTelegramUnsupported(sessionId, 'No text or caption and photo not handled in current stage')
     const reply = 'Unsupported message type. Please send text or image.'
@@ -322,7 +323,41 @@ export async function handleTelegramUpdate(update: TelegramUpdate): Promise<stri
     return reply
   }
 
+  // Payout setup: when user is in payment_agent and sends something that looks like an email, save it and mark payout setup complete.
+  const stage = state?.workflowStage ?? sessionData?.activeAgentId
+  const isPaymentAgent = stage === 'payment_agent' || sessionData?.activeAgentId === 'payment_agent'
+  const looksLikeEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text)
+  if (isPaymentAgent && looksLikeEmail && !state?.paymentCompleted) {
+    await updateSessionState(
+      sessionId,
+      (current) => ({
+        ...current,
+        payoutEmail: text,
+        paymentCompleted: true,
+        paymentStatus: 'paid',
+        workflowStage: 'payment_agent',
+      }),
+      'payment_agent',
+    )
+    const result = await session.send('Payout email received.')
+    logA3Out(sessionId, result.responseMessage, result.state as Record<string, unknown>)
+    return result.responseMessage
+  }
+
   const result = await session.send(text)
-  logA3Out(sessionId, result.responseMessage, result.state as Record<string, unknown>)
+  const nextState = result.state as Record<string, unknown> | undefined
+  logA3Out(sessionId, result.responseMessage, nextState)
+
+  // When user reaches completion (finished selfies), trigger PayPal Payout if we have payout email and haven't paid yet.
+  const activeAgentId = nextState?.activeAgentId ?? (nextState?.workflowStage as string)
+  const isCompletion = activeAgentId === 'completion_agent'
+  const hasPayoutEmail = typeof nextState?.payoutEmail === 'string' && nextState.payoutEmail.length > 0
+  const notYetPaid = !nextState?.payoutBatchId
+  if (isCompletion && hasPayoutEmail && notYetPaid) {
+    executePayoutForSession(sessionId).catch((err) =>
+      console.error('[Telegram] Payout trigger failed', { sessionId, message: err instanceof Error ? err.message : err }),
+    )
+  }
+
   return result.responseMessage
 }

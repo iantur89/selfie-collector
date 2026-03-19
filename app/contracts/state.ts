@@ -59,6 +59,10 @@ export const CollectorStateSchema = z.object({
   paymentProvider: z.literal('paypal').default('paypal'),
   paymentTransactionId: z.string().optional(),
   paymentCheckoutUrl: z.string().optional(),
+  /** PayPal (or other) email for sending payouts to the user. Set when user provides it in payment_agent. */
+  payoutEmail: z.string().optional(),
+  /** PayPal payout_batch_id after we've sent a payout for this session (avoids double-paying). */
+  payoutBatchId: z.string().optional(),
   selfieCount: z.number().int().default(0),
   minSelfiesRequired: z.number().int().default(5),
   maxSelfiesAllowed: z.number().int().default(20),

@@ -2,8 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { CreatePayPalCheckoutInputSchema, CreatePayPalCheckoutOutputSchema } from '../../contracts/tools'
 import { env } from '../config/env'
 
-function getPayPalApiBaseUrl(): string {
-  // Infer API host from checkout host if possible.
+export function getPayPalApiBaseUrl(): string {
   return env.payPalBaseUrl.includes('sandbox')
     ? 'https://api-m.sandbox.paypal.com'
     : 'https://api-m.paypal.com'
@@ -11,6 +10,27 @@ function getPayPalApiBaseUrl(): string {
 
 function formatAmount(value: number): string {
   return value.toFixed(2)
+}
+
+/** Get OAuth2 access token for PayPal REST APIs (Checkout, Payouts). Returns null if creds missing or auth fails. */
+export async function getPayPalAccessToken(): Promise<string | null> {
+  const clientId = env.payPalClientId?.trim()
+  const clientSecret = env.payPalClientSecret?.trim()
+  if (!clientId || !clientSecret) return null
+
+  const apiBaseUrl = getPayPalApiBaseUrl()
+  const auth = Buffer.from(`${clientId}:${clientSecret}`).toString('base64')
+  const tokenResponse = await fetch(`${apiBaseUrl}/v1/oauth2/token`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Basic ${auth}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: 'grant_type=client_credentials',
+  })
+  if (!tokenResponse.ok) return null
+  const tokenJson = (await tokenResponse.json()) as { access_token?: string }
+  return tokenJson.access_token ?? null
 }
 
 export async function createPayPalCheckout(input: unknown) {
@@ -135,4 +155,92 @@ export async function createPayPalCheckout(input: unknown) {
     checkoutUrl,
     transactionId,
   })
+}
+
+export type CreatePayPalPayoutInput = {
+  recipientEmail: string
+  amount: number
+  currency: string
+  note?: string
+  senderItemId: string
+}
+
+export type CreatePayPalPayoutResult =
+  | { status: 'success'; payoutBatchId: string }
+  | { status: 'retryable_error'; error: { code: string; message: string } }
+  | { status: 'fatal_error'; error: { code: string; message: string } }
+
+/**
+ * Create a single-item PayPal Payout (send money to recipient email).
+ * Requires PayPal app to have Payouts product enabled (Developer Dashboard).
+ */
+export async function createPayPalPayout(input: CreatePayPalPayoutInput): Promise<CreatePayPalPayoutResult> {
+  const accessToken = await getPayPalAccessToken()
+  if (!accessToken) {
+    return {
+      status: 'fatal_error',
+      error: { code: 'PAYPAL_NO_ACCESS_TOKEN', message: 'PayPal credentials not configured or auth failed.' },
+    }
+  }
+
+  const senderBatchId = `payout_${input.senderItemId}_${Date.now()}`.replace(/[^a-zA-Z0-9_-]/g, '_')
+  const apiBaseUrl = getPayPalApiBaseUrl()
+
+  const body = {
+    sender_batch_header: {
+      sender_batch_id: senderBatchId,
+      email_subject: 'You have a payout!',
+      email_message: input.note ?? 'You have received a payout.',
+    },
+    items: [
+      {
+        recipient_type: 'EMAIL',
+        amount: { value: formatAmount(input.amount), currency: input.currency },
+        note: input.note ?? 'Payout',
+        sender_item_id: input.senderItemId,
+        receiver: input.recipientEmail,
+      },
+    ],
+  }
+
+  const res = await fetch(`${apiBaseUrl}/v1/payments/payouts`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  })
+
+  const text = await res.text().catch(() => '')
+  if (!res.ok) {
+    const isRetryable = res.status >= 500 || res.status === 429
+    return {
+      status: isRetryable ? 'retryable_error' : 'fatal_error',
+      error: {
+        code: `PAYPAL_PAYOUT_${res.status}`,
+        message: text ? text.slice(0, 500) : `PayPal Payouts API returned ${res.status}`,
+      },
+    }
+  }
+
+  let json: { batch_header?: { payout_batch_id?: string } }
+  try {
+    json = JSON.parse(text) as { batch_header?: { payout_batch_id?: string } }
+  } catch {
+    return {
+      status: 'fatal_error',
+      error: { code: 'PAYPAL_PAYOUT_PARSE', message: 'Invalid response from PayPal.' },
+    }
+  }
+
+  const payoutBatchId = json.batch_header?.payout_batch_id
+  if (!payoutBatchId) {
+    return {
+      status: 'fatal_error',
+      error: { code: 'PAYPAL_PAYOUT_NO_BATCH_ID', message: 'Response missing payout_batch_id.' },
+    }
+  }
+
+  return { status: 'success', payoutBatchId }
 }
