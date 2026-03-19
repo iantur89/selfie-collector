@@ -2,8 +2,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createCollectorSession } from '@server/a3/session'
 import { withSessionLock } from '@server/session/sessionLock'
 import { collectorInitialState } from '@agents/collector'
+import { executePayoutForSession } from '@server/payouts/executePayout'
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const INITIAL_PAYOUT_AMOUNT_USD = 0.25
+const INITIAL_PAYOUT_CURRENCY = 'USD'
 
 export async function GET(request: NextRequest) {
   const sessionId = request.nextUrl.searchParams.get('sessionId')
@@ -82,5 +85,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Session not ready or payout already complete', code: 'NOT_APPLICABLE' }, { status: 400 })
   }
 
-  return NextResponse.json({ ok: true, sessionId })
+  // Best-effort initial payout as soon as we have the payout email.
+  const initialPayout = await executePayoutForSession(sessionId, {
+    amount: INITIAL_PAYOUT_AMOUNT_USD,
+    currency: INITIAL_PAYOUT_CURRENCY,
+  })
+
+  return NextResponse.json({ ok: true, sessionId, initialPayout })
 }

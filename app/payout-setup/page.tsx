@@ -66,7 +66,14 @@ function PayoutSetupForm() {
         return
       }
       setStatus('success')
-      setMessage('Payout email saved. Return to Telegram to continue.')
+      const initialPayout = data?.initialPayout
+      if (initialPayout?.ok === true) {
+        setMessage('Initial payout sent. Return to Telegram to continue.')
+      } else if (initialPayout?.ok === false) {
+        setMessage('Payout email saved, but initial payout could not be sent right now. Please check logs.')
+      } else {
+        setMessage('Payout email saved. Return to Telegram to continue.')
+      }
     } catch {
       setStatus('error')
       setMessage('Request failed. Try again.')

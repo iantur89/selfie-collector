@@ -339,7 +339,22 @@ export async function handleTelegramUpdate(update: TelegramUpdate): Promise<stri
       }),
       'payment_agent',
     )
-    const result = await session.send('Payout email received.')
+    // Send an initial small payout immediately after we capture the payout email.
+    // This avoids waiting until the end of ingest just to prove payout wiring.
+    const initialAmount = 0.25
+    let payoutAck = 'Payout email received.'
+    try {
+      const initialPayout = await executePayoutForSession(sessionId, { amount: initialAmount, currency: 'USD' })
+      if (initialPayout.ok) {
+        payoutAck = 'Payout email received. Initial payout sent.'
+      } else {
+        payoutAck = 'Payout email received. Initial payout will be processed.'
+      }
+    } catch (err) {
+      payoutAck = 'Payout email received. Initial payout will be processed.'
+    }
+
+    const result = await session.send(payoutAck)
     logA3Out(sessionId, result.responseMessage, result.state as Record<string, unknown>)
     return result.responseMessage
   }
