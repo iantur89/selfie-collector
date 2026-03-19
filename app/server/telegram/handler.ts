@@ -330,26 +330,55 @@ export async function handleTelegramUpdate(update: TelegramUpdate): Promise<stri
         sessionId,
         userId,
         selfieS3Key: artifactKey,
+        referenceSelfieS3Key: state?.selfieImageS3Key,
       })
 
       let nextSelfieCount = 0
       let accepted = false
+      const selfieId = randomUUID()
       await updateSessionState(
         sessionId,
         (current) => ({
           ...current,
           acceptedSelfieIds:
             validation.status === 'success' && validation.accepted
-              ? [...current.acceptedSelfieIds, randomUUID()]
+              ? [...current.acceptedSelfieIds, selfieId]
               : current.acceptedSelfieIds,
           rejectedSelfieIds:
             validation.status === 'success' && !validation.accepted
-              ? [...current.rejectedSelfieIds, randomUUID()]
+              ? [...current.rejectedSelfieIds, selfieId]
               : current.rejectedSelfieIds,
           selfieCount:
             validation.status === 'success' && validation.accepted
               ? current.selfieCount + 1
               : current.selfieCount,
+          selfieTags:
+            validation.status === 'success' && validation.accepted && validation.tags
+              ? [
+                  ...current.selfieTags,
+                  {
+                    selfieId,
+                    angle:
+                      validation.tags.cameraAngle === 'high_angle'
+                        ? 'high_angle'
+                        : validation.tags.cameraAngle === 'low_angle'
+                          ? 'low_angle'
+                          : validation.tags.faceAngle,
+                    lighting: validation.tags.lighting,
+                    gender: validation.tags.gender,
+                    demographics: [validation.tags.ageGroup, validation.tags.skinTone, validation.tags.demographic],
+                    quality: {
+                      blurScore: validation.tags.blurScore,
+                      occluded: validation.tags.occluded,
+                      resolutionBucket: validation.tags.resolutionBucket,
+                    },
+                    confidence: validation.tags.faceMatchScore ?? 0,
+                    modelName: 'aws-rekognition',
+                    modelVersion: '2026-03',
+                    createdAt: new Date().toISOString(),
+                  },
+                ]
+              : current.selfieTags,
         }),
         'ingest_agent',
       )

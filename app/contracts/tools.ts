@@ -74,12 +74,54 @@ export const ValidateSelfieInputSchema = z.object({
   sessionId: z.string(),
   userId: z.string(),
   selfieS3Key: z.string(),
+  referenceSelfieS3Key: z.string().optional(),
+})
+
+export const ValidateSelfieLightingSchema = z.enum(['dark', 'normal', 'bright'])
+export const ValidateSelfieFaceAngleSchema = z.enum(['frontal', 'left', 'right', 'up', 'down'])
+export const ValidateSelfieCameraAngleSchema = z.enum(['eye_level', 'high_angle', 'low_angle', 'unknown'])
+export const ValidateSelfieAgeGroupSchema = z.enum([
+  'minor',
+  'young_adult',
+  'adult',
+  'middle_aged',
+  'senior',
+  'unknown',
+])
+export const ValidateSelfieSkinToneSchema = z.enum(['light', 'medium', 'dark', 'unknown'])
+export const ValidateSelfieDemographicSchema = z.enum([
+  'black',
+  'white',
+  'asian',
+  'latino',
+  'middle_eastern',
+  'south_asian',
+  'pacific_islander',
+  'indigenous',
+  'unknown',
+])
+export const ValidateSelfieResolutionBucketSchema = z.enum(['low', 'medium', 'high'])
+export const ValidateSelfieGenderSchema = z.enum(['female', 'male', 'non_binary', 'unknown'])
+
+export const ValidateSelfieTagsSchema = z.object({
+  lighting: ValidateSelfieLightingSchema,
+  faceAngle: ValidateSelfieFaceAngleSchema,
+  cameraAngle: ValidateSelfieCameraAngleSchema,
+  ageGroup: ValidateSelfieAgeGroupSchema,
+  skinTone: ValidateSelfieSkinToneSchema,
+  demographic: ValidateSelfieDemographicSchema,
+  resolutionBucket: ValidateSelfieResolutionBucketSchema,
+  gender: ValidateSelfieGenderSchema,
+  blurScore: z.number().min(0).max(1).optional(),
+  occluded: z.boolean().optional(),
+  faceMatchScore: z.number().min(0).max(1).optional(),
 })
 
 export const ValidateSelfieOutputSchema = z.object({
   status: ToolResultStatusSchema,
   accepted: z.boolean(),
   reason: z.string().optional(),
+  tags: ValidateSelfieTagsSchema.optional(),
   error: ToolErrorSchema.optional(),
 })
 
