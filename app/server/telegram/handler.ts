@@ -3,6 +3,7 @@ import { logA3In, logA3Out, logTelegramPhoto, logTelegramUnsupported } from '../
 import { registerCollectorAgents } from '../a3/registry'
 import { createCollectorSession, injectSystemEvent, updateSessionState } from '../a3/session'
 import { executePayoutForSession } from '../payouts/executePayout'
+import { validateSelfie } from '../integrations/ingestAdapter'
 import { verifyDocumentAndSelfie, faceMatch } from '../integrations/identityAdapter'
 import { createSigningLink } from '../integrations/docuSealAdapter'
 import { persistArtifact } from '../storage/artifactStore'
@@ -148,6 +149,17 @@ export async function handleTelegramUpdate(update: TelegramUpdate): Promise<stri
   const session = createCollectorSession(sessionId)
   const sessionData = await session.getSessionData()
   const state = sessionData?.state
+  const maybeTriggerCompletionPayout = (nextState: Record<string, unknown> | undefined) => {
+    const activeAgentId = nextState?.activeAgentId ?? (nextState?.workflowStage as string)
+    const isCompletion = activeAgentId === 'completion_agent'
+    const hasPayoutEmail = typeof nextState?.payoutEmail === 'string' && nextState.payoutEmail.length > 0
+    const notYetPaid = !nextState?.payoutBatchId
+    if (isCompletion && hasPayoutEmail && notYetPaid) {
+      executePayoutForSession(sessionId).catch((err) =>
+        console.error('[Telegram] Payout trigger failed', { sessionId, message: err instanceof Error ? err.message : err }),
+      )
+    }
+  }
 
   const incomingSummary = message.photo?.length
     ? `User sent an image. fileId: ${message.photo[message.photo.length - 1].file_id}`
@@ -176,17 +188,27 @@ export async function handleTelegramUpdate(update: TelegramUpdate): Promise<stri
     const photoBytes = await downloadTelegramPhoto(photoFileId, sessionId)
     if (!photoBytes) {
       logTelegramUnsupported(sessionId, 'Failed to download Telegram photo; skipping verification')
-      const reply = 'I could not download your photo from Telegram. Please try sending it again.'
-      logA3Out(sessionId, reply, state as Record<string, unknown>)
-      return reply
+      const result = await injectSystemEvent(
+        sessionId,
+        'The latest Telegram photo could not be downloaded. Ask the user to resend the image.',
+      )
+      const nextState = result.state as Record<string, unknown> | undefined
+      logA3Out(sessionId, result.responseMessage, nextState)
+      maybeTriggerCompletionPayout(nextState)
+      return result.responseMessage
     }
 
     const persisted = await persistTelegramPhotoToS3(artifactKey, photoBytes)
     if (!persisted) {
       logTelegramUnsupported(sessionId, 'Failed to persist Telegram photo to S3; skipping verification')
-      const reply = 'I received your photo, but I could not store it. Please try again.'
-      logA3Out(sessionId, reply, state as Record<string, unknown>)
-      return reply
+      const result = await injectSystemEvent(
+        sessionId,
+        'The latest Telegram photo could not be stored. Ask the user to resend the image.',
+      )
+      const nextState = result.state as Record<string, unknown> | undefined
+      logA3Out(sessionId, result.responseMessage, nextState)
+      maybeTriggerCompletionPayout(nextState)
+      return result.responseMessage
     }
 
     if (isIdVerifyFlow) {
@@ -198,14 +220,18 @@ export async function handleTelegramUpdate(update: TelegramUpdate): Promise<stri
             telegramChatId: String(chatId),
             telegramUserId: userId,
             idImageS3Key: artifactKey,
-            workflowStage: 'id_verify_agent',
             verificationAttempts: current.verificationAttempts + 1,
           }),
           'id_verify_agent',
         )
-        const reply = 'ID image received. Please upload your selfie now.'
-        logA3Out(sessionId, reply, { ...state, idImageS3Key: artifactKey, workflowStage: 'id_verify_agent' })
-        return reply
+        const result = await injectSystemEvent(
+          sessionId,
+          'User uploaded ID image successfully. Ask for their selfie upload next.',
+        )
+        const nextState = result.state as Record<string, unknown> | undefined
+        logA3Out(sessionId, result.responseMessage, nextState)
+        maybeTriggerCompletionPayout(nextState)
+        return result.responseMessage
       }
 
       const verify = await verifyDocumentAndSelfie({
@@ -300,29 +326,60 @@ export async function handleTelegramUpdate(update: TelegramUpdate): Promise<stri
     }
 
     if (stage === 'ingest_agent') {
+      const validation = await validateSelfie({
+        sessionId,
+        userId,
+        selfieS3Key: artifactKey,
+      })
+
+      let nextSelfieCount = 0
+      let accepted = false
       await updateSessionState(
         sessionId,
         (current) => ({
           ...current,
-          acceptedSelfieIds: [...current.acceptedSelfieIds, randomUUID()],
-          selfieCount: current.selfieCount + 1,
-          workflowStage:
-            current.selfieCount + 1 >= current.maxSelfiesAllowed ? 'completion_agent' : current.workflowStage,
+          acceptedSelfieIds:
+            validation.status === 'success' && validation.accepted
+              ? [...current.acceptedSelfieIds, randomUUID()]
+              : current.acceptedSelfieIds,
+          rejectedSelfieIds:
+            validation.status === 'success' && !validation.accepted
+              ? [...current.rejectedSelfieIds, randomUUID()]
+              : current.rejectedSelfieIds,
+          selfieCount:
+            validation.status === 'success' && validation.accepted
+              ? current.selfieCount + 1
+              : current.selfieCount,
         }),
         'ingest_agent',
       )
-      const reply = 'Photo received for ingest.'
-      logA3Out(sessionId, reply, state as Record<string, unknown>)
-      return reply
+      accepted = validation.status === 'success' && validation.accepted
+      nextSelfieCount = (state?.selfieCount ?? 0) + (accepted ? 1 : 0)
+
+      const result = await injectSystemEvent(
+        sessionId,
+        accepted
+          ? `Selfie upload accepted for ingest. selfieCount is now ${nextSelfieCount}.`
+          : `Selfie upload rejected for ingest. Reason: ${validation.reason ?? 'Invalid image format'}.`,
+      )
+      const nextState = result.state as Record<string, unknown> | undefined
+      logA3Out(sessionId, result.responseMessage, nextState)
+      maybeTriggerCompletionPayout(nextState)
+      return result.responseMessage
     }
   }
 
   const text = (message.text ?? message.caption ?? '').trim()
   if (!text) {
     logTelegramUnsupported(sessionId, 'No text or caption and photo not handled in current stage')
-    const reply = 'Unsupported message type. Please send text or image.'
-    logA3Out(sessionId, reply, state as Record<string, unknown>)
-    return reply
+    const result = await injectSystemEvent(
+      sessionId,
+      'User sent an unsupported message type. Ask them to send text or an image.',
+    )
+    const nextState = result.state as Record<string, unknown> | undefined
+    logA3Out(sessionId, result.responseMessage, nextState)
+    maybeTriggerCompletionPayout(nextState)
+    return result.responseMessage
   }
 
   // Payout setup: when user is in payment_agent and sends something that looks like an email, save it and mark payout setup complete.
@@ -357,24 +414,16 @@ export async function handleTelegramUpdate(update: TelegramUpdate): Promise<stri
     }
 
     const result = await session.send(payoutAck)
-    logA3Out(sessionId, result.responseMessage, result.state as Record<string, unknown>)
+    const nextState = result.state as Record<string, unknown> | undefined
+    logA3Out(sessionId, result.responseMessage, nextState)
+    maybeTriggerCompletionPayout(nextState)
     return result.responseMessage
   }
 
   const result = await session.send(text)
   const nextState = result.state as Record<string, unknown> | undefined
   logA3Out(sessionId, result.responseMessage, nextState)
-
-  // When user reaches completion (finished selfies), trigger PayPal Payout if we have payout email and haven't paid yet.
-  const activeAgentId = nextState?.activeAgentId ?? (nextState?.workflowStage as string)
-  const isCompletion = activeAgentId === 'completion_agent'
-  const hasPayoutEmail = typeof nextState?.payoutEmail === 'string' && nextState.payoutEmail.length > 0
-  const notYetPaid = !nextState?.payoutBatchId
-  if (isCompletion && hasPayoutEmail && notYetPaid) {
-    executePayoutForSession(sessionId).catch((err) =>
-      console.error('[Telegram] Payout trigger failed', { sessionId, message: err instanceof Error ? err.message : err }),
-    )
-  }
+  maybeTriggerCompletionPayout(nextState)
 
   return result.responseMessage
 }
