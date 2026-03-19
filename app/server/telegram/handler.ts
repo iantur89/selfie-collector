@@ -157,7 +157,9 @@ export async function handleTelegramUpdate(update: TelegramUpdate): Promise<stri
   if (message.photo && message.photo.length > 0) {
     const photoFileId = message.photo[message.photo.length - 1].file_id
     const artifactKey = `prod/${userId}/${sessionId}/telegram/${Date.now()}-${photoFileId}.jpg`
-    const stage = state?.workflowStage ?? 'onboarding_orchestrator'
+    // Route based on the agent that is actually active.
+    // Sometimes `workflowStage` lags behind while A3 transitions `activeAgentId`.
+    const stage = sessionData?.activeAgentId ?? state?.workflowStage ?? 'onboarding_orchestrator'
     // Accept photos when ID-verify agent is active (orchestrator may have transitioned but not set workflowStage in state)
     const isIdVerifyFlow =
       stage === 'id_verify_agent' || sessionData?.activeAgentId === 'id_verify_agent'
